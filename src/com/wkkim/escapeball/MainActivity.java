@@ -2,11 +2,13 @@ package com.wkkim.escapeball;
 
 import java.util.Random;
 
-import android.app.Activity;
+import net.daum.adam.publisher.AdView;
+import net.daum.adam.publisher.AdView.AnimationType;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -16,23 +18,37 @@ import android.graphics.PointF;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.Shader.TileMode;
+import android.media.AudioManager;
+import android.media.SoundPool;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Menu;
+import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 
-public class MainActivity extends Activity {
+import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.games.Games;
+import com.google.android.gms.games.leaderboard.LeaderboardScore;
+import com.google.android.gms.games.leaderboard.LeaderboardVariant;
+import com.google.android.gms.games.leaderboard.Leaderboards;
+import com.google.android.gms.games.leaderboard.Leaderboards.LoadPlayerScoreResult;
+import com.google.example.games.basegameutils.BaseGameActivity;
+
+public class MainActivity extends BaseGameActivity {
 	final  String TAG = "EscapeBall";
-	
+	final boolean DEBUG_BUILD = true;
 	private enum STATE {START, PLAYING, DIE};
 	private STATE mState = STATE.START;
+	AdView mAdView = null;
 
 	SurfaceView mSfView;
 	SurfaceHolder mSfHolder;
@@ -48,7 +64,7 @@ public class MainActivity extends Activity {
 	boolean mBallShadeToggle;
 	Paint mBallPaint, mBgPaint, mArcPaint, mCountPaint;
 	Rect mBgOriSrc, mBgSrc, mBgDst;
-	long preTime = System.currentTimeMillis();
+	long mPreTime = System.currentTimeMillis();
 
 	float mArcDistance = 0f;
 	float mArcSpeed = 0f;
@@ -71,14 +87,32 @@ public class MainActivity extends Activity {
 	Random mRandom;
 	int mCollision = 0;
 	
-	private final int FRAME = 30; 
+	private final int FRAME = 30;
+	
+	private SoundPool mSoundPool = null;
+	private int mArcSound, mConflictSound;
+	
+	
+	
+	private String LB_ID;
+	
+	
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		Log.d(TAG, "onCreate");
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
-
+		initAdam();
+		
+		setRequestedClients(BaseGameActivity.CLIENT_GAMES);
+		LB_ID = (String) getResources().getString(R.string.ld_id);
+		
+	/*	if (DEBUG_BUILD) {
+			enableDebugLog(true, "MyActivity");
+		}*/
+		
+		
 		mRandom = new Random(System.currentTimeMillis());
 		mSfView = (SurfaceView)findViewById(R.id.sfView);
 		mSfView.setDrawingCacheEnabled(true);
@@ -113,7 +147,11 @@ public class MainActivity extends Activity {
 		mBgSrc = new Rect((int)(bgWidth * 0.2), (int)(bgHeight * 0.2)
 				, (int)(bgWidth * 0.8), (int)(bgHeight*0.8));
 		//mBgSrc = new Rect(mBgOriSrc);
-		mBgPaint = new Paint();
+		
+		BitmapShader bgShader = new BitmapShader(mBgBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
+		mBgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+		mBgPaint.setShader(bgShader);
+
 		mStartBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.start);
 		mStartSrcRect = new Rect(0, 0, mStartBitmap.getWidth(), mStartBitmap.getHeight());
 		mStartDstRect = new RectF(mBallX - mBallRadius * 3, mBallY + mBallRadius * 2
@@ -128,13 +166,14 @@ public class MainActivity extends Activity {
 		//mArcAccel = mBallRadius / 200;
 		
 		mCountPaint = new Paint();
+		mCountPaint.setColor(0x88CCFF99);
 		mCountPaint.setTextAlign(Paint.Align.CENTER);
-		mCountPaint.setTextSize(mBallRadius * 2);
+		mCountPaint.setTextSize(mBallRadius * 3);
 
 		mSharedPreference = getPreferences(Context.MODE_PRIVATE);
 		mBestCount = mSharedPreference.getInt(BESTCOUNT, 0);
 		
-
+		initSoundPool();
 		resetValue();
 	}
 
@@ -149,12 +188,60 @@ public class MainActivity extends Activity {
 		// TODO Auto-generated method stub
 		super.onResume();
 	}
+	
+	@Override
+	protected void onDestroy() {
+		super.onDestroy();
+		if (mAdView != null) {
+			mAdView.destroy();
+			mAdView = null;
+		}
+		releaseSoundPool();
+	}
 
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu) {
 		// Inflate the menu; this adds items to the action bar if it is present.
 		getMenuInflater().inflate(R.menu.main, menu);
 		return true;
+	}
+	
+	
+
+	@Override
+	public boolean onPrepareOptionsMenu(Menu menu) {
+		super.onPrepareOptionsMenu(menu);
+		if (isSignedIn()) {};
+
+		return true;
+	}
+
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		switch (item.getItemId()) {
+		case R.id.score:
+			if (isSignedIn()) {
+				startActivityForResult(Games.Leaderboards.getLeaderboardIntent(getApiClient(), LB_ID), 0);
+			} else {
+				beginUserInitiatedSignIn();
+			}
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+	
+	private void initSoundPool() {
+		setVolumeControlStream(AudioManager.STREAM_MUSIC);
+		mSoundPool = new SoundPool(2, AudioManager.STREAM_MUSIC, 0);
+		mArcSound = mSoundPool.load(getApplicationContext(), R.raw.arc, 1);
+		mConflictSound = mSoundPool.load(getApplicationContext(), R.raw.conflict, 1);
+	}
+	
+	private void releaseSoundPool() {
+		if (mSoundPool != null) {
+			mSoundPool.release();
+			mSoundPool = null;
+		}
 	}
 
 	private void resetValue() {
@@ -180,15 +267,18 @@ public class MainActivity extends Activity {
 			mArcSpeed += mArcAccel;
 			mArcDistance -= mArcSpeed/2;
 			if (mCount % 5 == 0) {
-				mArcAccel *= 1.02; 
+				mArcAccel *= 1.01; 
 			}
 			if (mArcDistance <= 0) {
 				mArcDistance = mBallRadius * 14;
-				mArcSpeed = 0;
+				mArcSpeed = mBallRadius / 4;
 				mArcStart = (float)mRandom.nextInt(360);
-				mArcPaint.setColor(Color.LTGRAY);
-				mArcPaint.setARGB(255, mRandom.nextInt(255), mRandom.nextInt(255), mRandom.nextInt(255));
+				//mArcPaint.setColor(Color.LTGRAY);
+				mArcPaint.setARGB(255, mRandom.nextInt(128), mRandom.nextInt(128), mRandom.nextInt(128));
+				//Log.d(TAG,"Color : " + mArcPaint.getColor());
 				mCount++;
+				mSoundPool.stop(mArcSound);
+				mSoundPool.play(mArcSound, 1.0f, 1.0f, 0, 0, 1.0f);
 			}
 		}
 
@@ -219,10 +309,17 @@ public class MainActivity extends Activity {
 
 	}
 	
+
+
 	private void drawBackground(Canvas cvs) {
-		//Log.d(TAG, "Src : " + mBgOriSrc + "  Dst : " + mBgDst);
-		//mBgSrc.set(mBgOriSrc);
-		mBgSrc.offset((int)(mMoveX/200), (int)(mMoveY/200));
+		mBgSrc.offset((int)(mMoveX / 150), (int)(mMoveY / 150));
+		if (mBgSrc.left < 0 || mBgSrc.top < 0 || mBgSrc.right > mBgBitmap.getWidth() || mBgSrc.bottom > mBgBitmap.getHeight()) {
+			int bgWidth = mBgBitmap.getWidth();
+			int bgHeight = mBgBitmap.getHeight();
+			mBgSrc.set((int)(bgWidth * 0.2), (int)(bgHeight * 0.2)
+					, (int)(bgWidth * 0.8), (int)(bgHeight*0.8));
+		}
+		//Log.d(TAG, "BG src : " + mBgSrc);
 		cvs.drawBitmap(mBgBitmap, mBgSrc, mBgDst, mBgPaint);
 	}
 	
@@ -252,13 +349,13 @@ public class MainActivity extends Activity {
 
 	private void drawSurface() {
 		Canvas cvs = mSfHolder.lockCanvas();
-		if (cvs == null)
+		if (cvs == null) {
+			Log.d(TAG, "Lock canvas fail");
 			return;
-
-		/* To check performance */
-		/*		long curTime = System.currentTimeMillis();
-		Log.d(TAG, "Time : " + (curTime - preTime));
-		preTime = curTime; */
+		}
+		long curTime = System.currentTimeMillis();
+		Log.d(TAG, "drawDiff : " + (curTime - mPreTime));
+		mPreTime = curTime;
 
 		drawBackground(cvs);
 		drawBall(cvs);
@@ -269,12 +366,24 @@ public class MainActivity extends Activity {
 		else { /* PLAYING or DIE */
 			drawArc(cvs);
 			if (mState == STATE.PLAYING) {
+				/* DIE!! */
 				if (detectCollision(cvs)) {
+					mSoundPool.stop(mArcSound);
+					mSoundPool.play(mConflictSound, 1.0f, 1.0f, 0, 0, 1.0f);
 					mState = STATE.DIE;
 					mCollision = 100;
-					SharedPreferences.Editor editor = mSharedPreference.edit();
-					editor.putInt(BESTCOUNT, mBestCount);
-					editor.commit();
+					int preBestCount = mSharedPreference.getInt(BESTCOUNT, 0);
+					if (mBestCount > preBestCount) {
+						SharedPreferences.Editor editor = mSharedPreference.edit();
+						editor.putInt(BESTCOUNT, mBestCount);
+						editor.commit();
+					}
+					if (isSignedIn()) { /* submit everygame */
+						Games.Leaderboards.submitScore(getApiClient(), LB_ID, mBestCount);
+						if (mBestCount > preBestCount) {
+							startActivityForResult(Games.Leaderboards.getLeaderboardIntent(getApiClient(), LB_ID), 0);
+						}
+					}
 				}
 			}
 		}
@@ -283,7 +392,7 @@ public class MainActivity extends Activity {
 	}
 
 	private void drawCount(Canvas cvs) {
-		mCountPaint.setColor(mArcPaint.getColor());
+		//mCountPaint.setColor(mArcPaint.getColor());
 		if (mBestCount < mCount)
 			mBestCount = mCount;
 		cvs.drawText(mCount + "/" + mBestCount, mBallX, mBallY/4, mCountPaint);
@@ -326,49 +435,49 @@ public class MainActivity extends Activity {
 				if (mBallRect.left == interRect.left) {
 					a.set(interRect.right, interRect.top);
 					b.set(interRect.right, interRect.bottom);
-					Log.d(TAG, "left " + a + b);
+					//Log.d(TAG, "left " + a + b);
 				} else {
 					a.set(interRect.left, interRect.top);
 					b.set(interRect.left, interRect.bottom);
-					Log.d(TAG, "right " + a + b);
+					//Log.d(TAG, "right " + a + b);
 				}
 			} else if (mBallRect.left == interRect.left && mBallRect.right == interRect.right) {
 				if (mBallRect.top == interRect.top) {
 					a.set(interRect.left, interRect.bottom);
 					b.set(interRect.right, interRect.bottom);
-					Log.d(TAG, "top " + a + b);
+					//Log.d(TAG, "top " + a + b);
 				} else {
 					a.set(interRect.left, interRect.top);
 					b.set(interRect.right, interRect.top);
-					Log.d(TAG, "bottom " + a + b);
+					//Log.d(TAG, "bottom " + a + b);
 				}
 			} else if (mBallRect.left == interRect.left) {  
 				if (interRect.top == mBallRect.top) {
 					a.set(interRect.left, interRect.bottom);
 					b.set(interRect.right, interRect.top);
-					Log.d(TAG, "left top " + a + b);
+					//Log.d(TAG, "left top " + a + b);
 				} else if (interRect.bottom == mBallRect.bottom) {
 					a.set(interRect.left, interRect.top);
 					b.set(interRect.right, interRect.bottom);
-					Log.d(TAG, "left bottom " + a + b);
+					//Log.d(TAG, "left bottom " + a + b);
 				} else {
 					a.set(interRect.left, interRect.top);
 					b.set(interRect.left, interRect.bottom);
-					Log.d(TAG, "left inc " + a + b);
+					//Log.d(TAG, "left inc " + a + b);
 				}
 			} else if (mBallRect.right == interRect.right) {
 				if (interRect.top == mBallRect.top) {
 					a.set(interRect.left, interRect.top);
 					b.set(interRect.right, interRect.bottom);
-					Log.d(TAG, "right top " + a + b);
+					//Log.d(TAG, "right top " + a + b);
 				} else if (interRect.bottom == mBallRect.bottom) {
 					a.set(interRect.left, interRect.bottom);
 					b.set(interRect.right, interRect.top);
-					Log.d(TAG, "right bottom " + a + b);
+					//Log.d(TAG, "right bottom " + a + b);
 				} else {
 					a.set(interRect.right, interRect.top);
 					b.set(interRect.right, interRect.bottom);
-					Log.d(TAG, "right inc " + a + b);
+					//Log.d(TAG, "right inc " + a + b);
 				}
 			}
 			a.set(a.x - mArcRect.centerX(), (a.y - mArcRect.centerY()));
@@ -386,7 +495,7 @@ public class MainActivity extends Activity {
 			float arcHoleEnd = mArcStart;
 			final float MARGIN_DEGREE = 10;
 
-			Log.d(TAG, "-> Ang A : " + angA + "  Ang B : " + angB + " (" + arcHoleStart + "/" + arcHoleEnd +")");
+			//Log.d(TAG, "-> Ang A : " + angA + "  Ang B : " + angB + " (" + arcHoleStart + "/" + arcHoleEnd +")");
 			if (arcHoleStart < arcHoleEnd) { 
 				if (angA < arcHoleStart - MARGIN_DEGREE || angB < arcHoleStart - MARGIN_DEGREE
 						|| angA > arcHoleEnd + MARGIN_DEGREE || angB > arcHoleEnd + MARGIN_DEGREE) {
@@ -406,9 +515,8 @@ public class MainActivity extends Activity {
 			//Log.d(TAG, "After Ang A : " + angA + "  Ang B : " + angB);
 
 		}
-		return false;
 		//cvs.drawLine(a.x, a.y, b.x, b.y, p);
-
+		return false;
 	}
 
 	private float changeDegree(PointF p, float degree) {
@@ -463,4 +571,74 @@ public class MainActivity extends Activity {
 		}
 	}
 
+
+	@Override
+	public void onSignInFailed() {
+	}
+
+	@Override
+	public void onSignInSucceeded() {
+		// TODO Auto-generated method stub
+		PendingResult<Leaderboards.LoadPlayerScoreResult> score = 
+				Games.Leaderboards.loadCurrentPlayerLeaderboardScore(getApiClient(), LB_ID,
+						LeaderboardVariant.TIME_SPAN_ALL_TIME, LeaderboardVariant.COLLECTION_PUBLIC);
+		score.setResultCallback(new ResultCallback<Leaderboards.LoadPlayerScoreResult>() {
+			@Override
+			public void onResult(LoadPlayerScoreResult lpsr) {
+				LeaderboardScore score = lpsr.getScore();
+				if (score != null) {
+					String strScore = score.getDisplayScore();
+					int numScore = Integer.parseInt(strScore);
+					Log.i(TAG, "onResult calling " + numScore);
+					if (numScore > mBestCount) {
+						mBestCount = numScore;
+						SharedPreferences.Editor editor = mSharedPreference.edit();
+						editor.putInt(BESTCOUNT, mBestCount);
+						editor.commit();
+					}
+				}
+			}} );
+
+	}
+	private void initAdam() {
+		mAdView = (AdView) findViewById(R.id.adview);
+
+/*		mAdView.setOnAdClickedListener(new OnAdClickedListener() {
+			public void OnAdClicked() {
+				Log.i(TAG, "愿묎퀬瑜??대┃?덉뒿?덈떎.");
+			}
+		});
+
+		mAdView.setOnAdFailedListener(new OnAdFailedListener() {
+			public void OnAdFailed(AdError arg0, String arg1) {
+//				adWrapper.setVisibility(View.GONE);
+				Log.w(TAG, arg1);
+			}
+		});
+
+		mAdView.setOnAdLoadedListener(new OnAdLoadedListener() {
+			public void OnAdLoaded() {
+//				adWrapper.setVisibility(View.VISIBLE);
+				Log.i(TAG, "愿묎퀬媛 ?뺤긽?곸쑝濡?濡쒕뵫?섏뿀?듬땲??");
+			}
+		});
+
+		mAdView.setOnAdWillLoadListener(new OnAdWillLoadListener() {
+			public void OnAdWillLoad(String arg1) {
+//				Log.i(TAG, "愿묎퀬瑜?遺덈윭?듬땲?? : " + arg1);
+			}
+		});
+
+		mAdView.setOnAdClosedListener(new OnAdClosedListener() {
+			public void OnAdClosed() {
+//				Log.i(TAG, "愿묎퀬瑜??レ븯?듬땲??");
+			}
+		});*/
+
+		mAdView.setClientId("8a46Z46T14486e3e750");
+		mAdView.setRequestInterval(30);
+		//mAdView.setAnimationType(AnimationType.FLIP_HORIZONTAL);
+		mAdView.setAnimationType(AnimationType.NONE);
+		mAdView.setVisibility(View.VISIBLE);
+	}
 }
