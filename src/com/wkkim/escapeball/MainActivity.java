@@ -48,7 +48,7 @@ public class MainActivity extends BaseGameActivity {
 	final boolean DEBUG_BUILD = true;
 	private enum STATE {START, PLAYING, DIE};
 	private STATE mState = STATE.START;
-	AdView mAdView = null;
+	private AdView mAdView = null;
 
 	SurfaceView mSfView;
 	SurfaceHolder mSfHolder;
@@ -78,9 +78,12 @@ public class MainActivity extends BaseGameActivity {
 
 	float mMoveX = 0;
 	float mMoveY = 0;
-
+	float mBgMoveX = 0;
+	float mBgMoveY = 0;
+	
 	final String BESTCOUNT = "BESTCOUNT";
 	int mCount = 0;
+	int mLevel = 0;
 	int mBestCount = 0;
 	SharedPreferences mSharedPreference;	
 
@@ -90,10 +93,10 @@ public class MainActivity extends BaseGameActivity {
 	private final int FRAME = 30;
 	
 	private SoundPool mSoundPool = null;
-	private int mArcSound, mConflictSound;
+	private int mArcSound, mConflictSound, mClickSound;
 	
-	
-	
+	final int BALL_COLOR[][] = { {0xFFF0E68C, 0x008E2323}, {0xffafeeee, 0x00fdf5e6}, {0xffadff2f, 0x5f9ea0}, 
+			{0xffffc0cb, 0xffd700},	{0xffb5a642, 0x98fb98}};
 	private String LB_ID;
 	
 	
@@ -146,7 +149,6 @@ public class MainActivity extends BaseGameActivity {
 		int bgHeight = mBgBitmap.getHeight();
 		mBgSrc = new Rect((int)(bgWidth * 0.2), (int)(bgHeight * 0.2)
 				, (int)(bgWidth * 0.8), (int)(bgHeight*0.8));
-		//mBgSrc = new Rect(mBgOriSrc);
 		
 		BitmapShader bgShader = new BitmapShader(mBgBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
 		mBgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
@@ -185,7 +187,6 @@ public class MainActivity extends BaseGameActivity {
 
 	@Override
 	protected void onResume() {
-		// TODO Auto-generated method stub
 		super.onResume();
 	}
 	
@@ -235,6 +236,7 @@ public class MainActivity extends BaseGameActivity {
 		mSoundPool = new SoundPool(2, AudioManager.STREAM_MUSIC, 0);
 		mArcSound = mSoundPool.load(getApplicationContext(), R.raw.arc, 1);
 		mConflictSound = mSoundPool.load(getApplicationContext(), R.raw.conflict, 1);
+		mClickSound = mSoundPool.load(getApplicationContext(), R.raw.click, 1);
 	}
 	
 	private void releaseSoundPool() {
@@ -245,10 +247,15 @@ public class MainActivity extends BaseGameActivity {
 	}
 
 	private void resetValue() {
-		mArcAccel = mBallRadius / 100;
+		mArcAccel = mBallRadius / 50;
 		mCount = 0;
-		mMoveX = mMoveY = 0;
+		mLevel = 0;
+		mMoveX = mMoveY = mBgMoveX = mBgMoveY = 0;
 		mArcDistance = -1f;
+		int bgWidth = mBgBitmap.getWidth();
+		int bgHeight = mBgBitmap.getHeight();
+		mBgSrc.set((int)(bgWidth * 0.2), (int)(bgHeight * 0.2)
+				, (int)(bgWidth * 0.8), (int)(bgHeight*0.8));
 	}
 
 
@@ -256,27 +263,34 @@ public class MainActivity extends BaseGameActivity {
 		
 		if (mMoveX == 0 && mState == STATE.PLAYING) {
 			if (mTouchX > 0) {
+				mSoundPool.play(mClickSound, 1.0f, 1.0f, 0, 0, 1.0f);
 				float x = (mTouchX - mBallX) * -1f;
 				float y = (mTouchY - mBallY) * -1f;
 				float len = (float) Math.sqrt(x*x + y*y);
 				float mul = mBallRadius / len;
 				mMoveX = x * mul;
 				mMoveY = y * mul;
+				mBgMoveX = mMoveX;
+				mBgMoveY = mMoveY;
 				mTouchX = -1;
 			}
 			mArcSpeed += mArcAccel;
 			mArcDistance -= mArcSpeed/2;
-			if (mCount % 5 == 0) {
-				mArcAccel *= 1.01; 
-			}
 			if (mArcDistance <= 0) {
 				mArcDistance = mBallRadius * 14;
 				mArcSpeed = mBallRadius / 4;
 				mArcStart = (float)mRandom.nextInt(360);
 				//mArcPaint.setColor(Color.LTGRAY);
-				mArcPaint.setARGB(255, mRandom.nextInt(128), mRandom.nextInt(128), mRandom.nextInt(128));
+				mArcPaint.setARGB(255, mRandom.nextInt(200) + 55, mRandom.nextInt(200) + 55, mRandom.nextInt(200) + 55);
 				//Log.d(TAG,"Color : " + mArcPaint.getColor());
 				mCount++;
+				mArcAccel *= 1.05;
+				if (mCount % 10 == 0) {
+					mLevel++;
+					if (mLevel >= BALL_COLOR.length)
+						mLevel = 0;
+				}
+
 				mSoundPool.stop(mArcSound);
 				mSoundPool.play(mArcSound, 1.0f, 1.0f, 0, 0, 1.0f);
 			}
@@ -287,11 +301,11 @@ public class MainActivity extends BaseGameActivity {
 		
 		if (mState == STATE.PLAYING) {
 			if (mMoveX * mMoveX + mMoveY * mMoveY > mBallRadius * mBallRadius * 144) {
-				mMoveX = mMoveY = 0;
+				mMoveX = mMoveY = mBgMoveX = mBgMoveY = 0;
 				mArcDistance = -1f;
 			} else {
-				mMoveX += mMoveX * .2F;
-				mMoveY += mMoveY * .2F;
+				mMoveX += mMoveX * .25F;
+				mMoveY += mMoveY * .25F;
 			}
 		} else { /* DIE */
 			mMoveX += mMoveX * 0.005F;
@@ -312,15 +326,15 @@ public class MainActivity extends BaseGameActivity {
 
 
 	private void drawBackground(Canvas cvs) {
-		mBgSrc.offset((int)(mMoveX / 150), (int)(mMoveY / 150));
+		mBgSrc.offset((int)(mBgMoveX/10), (int)(mBgMoveY/10));
 		if (mBgSrc.left < 0 || mBgSrc.top < 0 || mBgSrc.right > mBgBitmap.getWidth() || mBgSrc.bottom > mBgBitmap.getHeight()) {
 			int bgWidth = mBgBitmap.getWidth();
 			int bgHeight = mBgBitmap.getHeight();
 			mBgSrc.set((int)(bgWidth * 0.2), (int)(bgHeight * 0.2)
 					, (int)(bgWidth * 0.8), (int)(bgHeight*0.8));
 		}
-		//Log.d(TAG, "BG src : " + mBgSrc);
 		cvs.drawBitmap(mBgBitmap, mBgSrc, mBgDst, mBgPaint);
+		//cvs.drawColor(Color.WHITE);
 	}
 	
 	private void drawStart(Canvas cvs) {
@@ -341,7 +355,8 @@ public class MainActivity extends BaseGameActivity {
 		if (mState == STATE.DIE) {
 			mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, Color.BLACK, Color.WHITE, TileMode.REPEAT));
 		} else {
-			mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, 0xFFF0E68C, 0x8E2323, TileMode.CLAMP));
+			//mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, 0xFFF0E68C, 0x8E2323, TileMode.CLAMP));
+			mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, BALL_COLOR[mLevel][0], BALL_COLOR[mLevel][1], TileMode.CLAMP));
 		}
 		cvs.drawCircle(mBallX, mBallY, mBallRadius, mBallPaint);
 		
@@ -353,10 +368,11 @@ public class MainActivity extends BaseGameActivity {
 			Log.d(TAG, "Lock canvas fail");
 			return;
 		}
-		long curTime = System.currentTimeMillis();
+		/*
+ 		long curTime = System.currentTimeMillis();
 		Log.d(TAG, "drawDiff : " + (curTime - mPreTime));
 		mPreTime = curTime;
-
+		 */
 		drawBackground(cvs);
 		drawBall(cvs);
 		drawCount(cvs);
@@ -371,7 +387,7 @@ public class MainActivity extends BaseGameActivity {
 					mSoundPool.stop(mArcSound);
 					mSoundPool.play(mConflictSound, 1.0f, 1.0f, 0, 0, 1.0f);
 					mState = STATE.DIE;
-					mCollision = 100;
+					mCollision = 40;
 					int preBestCount = mSharedPreference.getInt(BESTCOUNT, 0);
 					if (mBestCount > preBestCount) {
 						SharedPreferences.Editor editor = mSharedPreference.edit();
@@ -533,7 +549,6 @@ public class MainActivity extends BaseGameActivity {
 		@Override
 		public void surfaceChanged(SurfaceHolder holder, int format, int width,
 				int height) {
-			// TODO Auto-generated method stub
 			mBgDst = holder.getSurfaceFrame();
 		}
 
@@ -550,6 +565,7 @@ public class MainActivity extends BaseGameActivity {
 					case MotionEvent.ACTION_UP:
 						if (mState == STATE.START) {
 							if (mStartDstRect.contains(event.getX(), event.getY())) {
+								mSoundPool.play(mClickSound, 1.0f, 1.0f, 0, 0, 1.0f);
 								mState = STATE.PLAYING;
 							}
 						}
@@ -578,7 +594,6 @@ public class MainActivity extends BaseGameActivity {
 
 	@Override
 	public void onSignInSucceeded() {
-		// TODO Auto-generated method stub
 		PendingResult<Leaderboards.LoadPlayerScoreResult> score = 
 				Games.Leaderboards.loadCurrentPlayerLeaderboardScore(getApiClient(), LB_ID,
 						LeaderboardVariant.TIME_SPAN_ALL_TIME, LeaderboardVariant.COLLECTION_PUBLIC);
@@ -602,39 +617,6 @@ public class MainActivity extends BaseGameActivity {
 	}
 	private void initAdam() {
 		mAdView = (AdView) findViewById(R.id.adview);
-
-/*		mAdView.setOnAdClickedListener(new OnAdClickedListener() {
-			public void OnAdClicked() {
-				Log.i(TAG, "愿묎퀬瑜??대┃?덉뒿?덈떎.");
-			}
-		});
-
-		mAdView.setOnAdFailedListener(new OnAdFailedListener() {
-			public void OnAdFailed(AdError arg0, String arg1) {
-//				adWrapper.setVisibility(View.GONE);
-				Log.w(TAG, arg1);
-			}
-		});
-
-		mAdView.setOnAdLoadedListener(new OnAdLoadedListener() {
-			public void OnAdLoaded() {
-//				adWrapper.setVisibility(View.VISIBLE);
-				Log.i(TAG, "愿묎퀬媛 ?뺤긽?곸쑝濡?濡쒕뵫?섏뿀?듬땲??");
-			}
-		});
-
-		mAdView.setOnAdWillLoadListener(new OnAdWillLoadListener() {
-			public void OnAdWillLoad(String arg1) {
-//				Log.i(TAG, "愿묎퀬瑜?遺덈윭?듬땲?? : " + arg1);
-			}
-		});
-
-		mAdView.setOnAdClosedListener(new OnAdClosedListener() {
-			public void OnAdClosed() {
-//				Log.i(TAG, "愿묎퀬瑜??レ븯?듬땲??");
-			}
-		});*/
-
 		mAdView.setClientId("8a46Z46T14486e3e750");
 		mAdView.setRequestInterval(30);
 		//mAdView.setAnimationType(AnimationType.FLIP_HORIZONTAL);
