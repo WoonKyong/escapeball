@@ -4,6 +4,7 @@ import java.util.Random;
 
 import net.daum.adam.publisher.AdView;
 import net.daum.adam.publisher.AdView.AnimationType;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
@@ -33,6 +34,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.Window;
 
 import com.google.android.gms.common.api.PendingResult;
 import com.google.android.gms.common.api.ResultCallback;
@@ -55,14 +57,21 @@ public class MainActivity extends BaseGameActivity {
 	Handler mDrawHandler;
 	Bitmap mBgBitmap;
 	Bitmap mStartBitmap;
+	Bitmap mRankingBitmap;
+	Bitmap mFingureBitmap;
 	Rect mStartSrcRect;
 	RectF mStartDstRect;
+	Rect mFingureSrcRect;
+	RectF mFingureDstRect;
+	
+	Rect mRankingSrcRect;
+	RectF mRankingDstRect;
 
 	boolean mDestroy = false;
 	float mBallX, mBallY, mBallRadius, mBallShade;
 	RectF mBallRect;
 	boolean mBallShadeToggle;
-	Paint mBallPaint, mBgPaint, mArcPaint, mCountPaint;
+	Paint mBallPaint, mBgPaint, mArcPaint, mCountPaint, mGuideArcPaint;
 	Rect mBgOriSrc, mBgSrc, mBgDst;
 	long mPreTime = System.currentTimeMillis();
 
@@ -72,6 +81,7 @@ public class MainActivity extends BaseGameActivity {
 	float mArcStart = 0f;
 	float mArcSweep = 270f;
 	RectF mArcRect = null;
+	RectF mGuideArcRect = null;
 
 	float mTouchX = -1;
 	float mTouchY = -1;
@@ -82,6 +92,7 @@ public class MainActivity extends BaseGameActivity {
 	float mBgMoveY = 0;
 	
 	final String BESTCOUNT = "BESTCOUNT";
+	final String SHOWGUIDE = "SHOWGUIDE";
 	int mCount = 0;
 	int mLevel = 0;
 	int mBestCount = 0;
@@ -93,28 +104,26 @@ public class MainActivity extends BaseGameActivity {
 	private final int FRAME = 30;
 	
 	private SoundPool mSoundPool = null;
-	private int mArcSound, mConflictSound, mClickSound;
+	private int mArcSound, mConflictSound, mClickSound, mStartSound;
 	
 	final int BALL_COLOR[][] = { {0xFFF0E68C, 0x008E2323}, {0xffafeeee, 0x00fdf5e6}, {0xffadff2f, 0x5f9ea0}, 
 			{0xffffc0cb, 0xffd700},	{0xffb5a642, 0x98fb98}};
 	private String LB_ID;
+	
+	Dialog mGuideDialog;
 	
 	
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		Log.d(TAG, "onCreate");
+		requestWindowFeature(Window.FEATURE_NO_TITLE);
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 		initAdam();
 		
 		setRequestedClients(BaseGameActivity.CLIENT_GAMES);
 		LB_ID = (String) getResources().getString(R.string.ld_id);
-		
-	/*	if (DEBUG_BUILD) {
-			enableDebugLog(true, "MyActivity");
-		}*/
-		
 		
 		mRandom = new Random(System.currentTimeMillis());
 		mSfView = (SurfaceView)findViewById(R.id.sfView);
@@ -153,24 +162,48 @@ public class MainActivity extends BaseGameActivity {
 		BitmapShader bgShader = new BitmapShader(mBgBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT);
 		mBgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
 		mBgPaint.setShader(bgShader);
-
+		
+		
 		mStartBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.start);
 		mStartSrcRect = new Rect(0, 0, mStartBitmap.getWidth(), mStartBitmap.getHeight());
-		mStartDstRect = new RectF(mBallX - mBallRadius * 3, mBallY + mBallRadius * 2
-				, mBallX + mBallRadius * 3, mBallY + mBallRadius * 4);
+		mStartDstRect = new RectF(mBallX - mBallRadius * 5f, mBallY + mBallRadius * 2f
+				, mBallX - mBallRadius * 1f, mBallY + mBallRadius * 5f);
+		
+		mRankingBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.ranking);
+		mRankingSrcRect = new Rect(0, 0, mRankingBitmap.getWidth(), mRankingBitmap.getHeight());
+		mRankingDstRect = new RectF(mBallX + mBallRadius * 1f, mBallY + mBallRadius * 2f
+				, mBallX + mBallRadius * 5f, mBallY + mBallRadius * 5f);
+		
 		
 		mArcPaint = new Paint();
 		mArcPaint.setStyle(Paint.Style.STROKE);
 		mArcPaint.setStrokeJoin(Join.ROUND);
-		mArcPaint.setStrokeWidth(30);
+		mArcPaint.setStrokeWidth(mBallRadius / 2);
 		mArcPaint.setColor(Color.DKGRAY);
 		mArcRect = new RectF();
-		//mArcAccel = mBallRadius / 200;
 		
 		mCountPaint = new Paint();
-		mCountPaint.setColor(0x88CCFF99);
+		mCountPaint.setColor(0xffffffff);
 		mCountPaint.setTextAlign(Paint.Align.CENTER);
 		mCountPaint.setTextSize(mBallRadius * 3);
+		
+		mGuideArcRect = new RectF(mBallX - mBallRadius * 5f, mBallY - mBallRadius * 5f,
+								  mBallX + mBallRadius * 5f, mBallY + mBallRadius * 5f);
+		mGuideArcPaint = new Paint();
+		mGuideArcPaint.setStyle(Paint.Style.STROKE);
+		mGuideArcPaint.setStrokeJoin(Join.ROUND);
+		mGuideArcPaint.setStrokeWidth(mBallRadius / 2);
+		mGuideArcPaint.setColor(0x88fdf5e6);
+		
+		mFingureBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.fingure);
+		mFingureSrcRect = new Rect(0, 0, mRankingBitmap.getWidth(), mRankingBitmap.getHeight());
+		float fingureCenterX = mBallX + mBallRadius * 5f;
+		float fingureCenterY = mBallY - mBallRadius * 5f;
+		
+		mFingureDstRect = new RectF(fingureCenterX - mBallRadius * 3f, fingureCenterY
+				,fingureCenterX + mBallRadius * 7f , fingureCenterY + mBallRadius * 6f);
+		
+		
 
 		mSharedPreference = getPreferences(Context.MODE_PRIVATE);
 		mBestCount = mSharedPreference.getInt(BESTCOUNT, 0);
@@ -182,7 +215,6 @@ public class MainActivity extends BaseGameActivity {
 	@Override
 	protected void onPause() {
 		super.onPause();
-
 	}
 
 	@Override
@@ -200,43 +232,13 @@ public class MainActivity extends BaseGameActivity {
 		releaseSoundPool();
 	}
 
-	@Override
-	public boolean onCreateOptionsMenu(Menu menu) {
-		// Inflate the menu; this adds items to the action bar if it is present.
-		getMenuInflater().inflate(R.menu.main, menu);
-		return true;
-	}
-	
-	
-
-	@Override
-	public boolean onPrepareOptionsMenu(Menu menu) {
-		super.onPrepareOptionsMenu(menu);
-		if (isSignedIn()) {};
-
-		return true;
-	}
-
-	@Override
-	public boolean onOptionsItemSelected(MenuItem item) {
-		switch (item.getItemId()) {
-		case R.id.score:
-			if (isSignedIn()) {
-				startActivityForResult(Games.Leaderboards.getLeaderboardIntent(getApiClient(), LB_ID), 0);
-			} else {
-				beginUserInitiatedSignIn();
-			}
-			return true;
-		}
-		return super.onOptionsItemSelected(item);
-	}
-	
 	private void initSoundPool() {
 		setVolumeControlStream(AudioManager.STREAM_MUSIC);
 		mSoundPool = new SoundPool(2, AudioManager.STREAM_MUSIC, 0);
 		mArcSound = mSoundPool.load(getApplicationContext(), R.raw.arc, 1);
 		mConflictSound = mSoundPool.load(getApplicationContext(), R.raw.conflict, 1);
 		mClickSound = mSoundPool.load(getApplicationContext(), R.raw.click, 1);
+		mStartSound = mSoundPool.load(getApplicationContext(), R.raw.start, 1);
 	}
 	
 	private void releaseSoundPool() {
@@ -337,8 +339,14 @@ public class MainActivity extends BaseGameActivity {
 		//cvs.drawColor(Color.WHITE);
 	}
 	
-	private void drawStart(Canvas cvs) {
+	private void drawButton(Canvas cvs) {
 		cvs.drawBitmap(mStartBitmap, mStartSrcRect, mStartDstRect, mBgPaint);
+		cvs.drawBitmap(mRankingBitmap, mRankingSrcRect, mRankingDstRect, mBgPaint);
+	}
+	
+	private void drawGuide(Canvas cvs) {
+		cvs.drawArc(mGuideArcRect, 0, mArcSweep, false, mGuideArcPaint);
+		cvs.drawBitmap(mFingureBitmap, mFingureSrcRect, mFingureDstRect, mBgPaint);
 	}
 	
 	private void drawBall(Canvas cvs) {
@@ -355,7 +363,6 @@ public class MainActivity extends BaseGameActivity {
 		if (mState == STATE.DIE) {
 			mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, Color.BLACK, Color.WHITE, TileMode.REPEAT));
 		} else {
-			//mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, 0xFFF0E68C, 0x8E2323, TileMode.CLAMP));
 			mBallPaint.setShader(new RadialGradient(mBallX, mBallY, mBallShade, BALL_COLOR[mLevel][0], BALL_COLOR[mLevel][1], TileMode.CLAMP));
 		}
 		cvs.drawCircle(mBallX, mBallY, mBallRadius, mBallPaint);
@@ -377,9 +384,10 @@ public class MainActivity extends BaseGameActivity {
 		drawBall(cvs);
 		drawCount(cvs);
 		
-		if (mState == STATE.START)
-			drawStart(cvs);
-		else { /* PLAYING or DIE */
+		if (mState == STATE.START) {
+			drawGuide(cvs);
+			drawButton(cvs);
+		} else { /* PLAYING or DIE */
 			drawArc(cvs);
 			if (mState == STATE.PLAYING) {
 				/* DIE!! */
@@ -554,6 +562,7 @@ public class MainActivity extends BaseGameActivity {
 
 		@Override
 		public void surfaceCreated(SurfaceHolder holder) {
+			//displayGuide();
 			mSfView.setOnTouchListener(new View.OnTouchListener() {
 				@Override
 				public boolean onTouch(View v, MotionEvent event) {
@@ -565,8 +574,14 @@ public class MainActivity extends BaseGameActivity {
 					case MotionEvent.ACTION_UP:
 						if (mState == STATE.START) {
 							if (mStartDstRect.contains(event.getX(), event.getY())) {
-								mSoundPool.play(mClickSound, 1.0f, 1.0f, 0, 0, 1.0f);
+								mSoundPool.play(mStartSound, 1.0f, 1.0f, 0, 0, 1.0f);
 								mState = STATE.PLAYING;
+							} else if (mRankingDstRect.contains(event.getX(), event.getY())) {
+								if (isSignedIn()) {
+									startActivityForResult(Games.Leaderboards.getLeaderboardIntent(getApiClient(), LB_ID), 0);
+								} else {
+									beginUserInitiatedSignIn();
+								}
 							}
 						}
 						mTouchX = mTouchY = -1;
@@ -577,7 +592,6 @@ public class MainActivity extends BaseGameActivity {
 				}
 			});
 			
-			//mBgBitmap = Bitmap.createScaledBitmap(mBgBitmap, mBgDst.width(), mBgDst.height(), false);
 			mDrawHandler.sendEmptyMessage(0);
 		}
 
@@ -619,8 +633,24 @@ public class MainActivity extends BaseGameActivity {
 		mAdView = (AdView) findViewById(R.id.adview);
 		mAdView.setClientId("8a46Z46T14486e3e750");
 		mAdView.setRequestInterval(30);
-		//mAdView.setAnimationType(AnimationType.FLIP_HORIZONTAL);
 		mAdView.setAnimationType(AnimationType.NONE);
 		mAdView.setVisibility(View.VISIBLE);
+	}
+	
+	private void displayGuide() {
+		boolean showGuide = mSharedPreference.getBoolean(SHOWGUIDE, true);
+		if (showGuide == false)
+			return;
+		
+		mGuideDialog = new Dialog(this);
+		mGuideDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+		mGuideDialog.setOwnerActivity(this);
+		mGuideDialog.setContentView(R.layout.guide);
+		mGuideDialog.getWindow().getAttributes().width = (int) (mBallX * 1.5);
+		mGuideDialog.getWindow().getAttributes().height = (int) (mBallX * 1.5);
+		mGuideDialog.show();
+		SharedPreferences.Editor editor = mSharedPreference.edit();
+		editor.putBoolean(SHOWGUIDE, false);
+		editor.commit();
 	}
 }
